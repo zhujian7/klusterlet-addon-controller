@@ -37,6 +37,9 @@ GIT_REMOTE_URL  = $(shell git config --get remote.origin.url)
 VCS_REF     = $(if $(shell git status --porcelain),$(GIT_COMMIT)-$(BUILD_DATE),$(GIT_COMMIT))
 endif
 
+KUBECONFIG ?= ./.kubeconfig
+KUBECTL?=kubectl
+
 .PHONY: deps
 ## Download all project dependencies
 deps: build/install-dependencies.sh
@@ -64,12 +67,8 @@ build:
 ## Builds controller binary inside of an image
 build-image: 
 	@$(DOCKER_BUILDER) build -t $(DOCKER_IMAGE) -f $(DOCKER_FILE) . 
-	#@$(DOCKER_BUILDER) tag $(DOCKER_IMAGE) ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:$(DOCKER_TAG)
+	@$(DOCKER_BUILDER) tag $(DOCKER_IMAGE) ${DOCKER_REGISTRY}/${DOCKER_IMAGE}:$(DOCKER_TAG)
 
-.PHONY: build-e2e
-build-e2e:
-	$(SELF) component/build COMPONENT_TAG_EXTENSION=-e2e COMPONENT_BUILD_COMMAND=$(PWD)/build/build-e2e.sh 
-	
 .PHONY: go-bindata
 go-bindata:
 	go-bindata -nometadata -pkg bindata -o pkg/bindata/bindata_generated.go -prefix deploy/ deploy/resources/ deploy/crds/ deploy/crds-v1/ deploy/crds-kube1.11/ deploy/resources/...
@@ -120,16 +119,17 @@ lint:
 
 .PHONY: utils-crds-install
 utils-crds-install:
-	kubectl apply -f deploy/dev-crds/agent.open-cluster-management.io_klusterletaddonconfigs_crd.yaml
+	$(KUBECTL) apply -f deploy/dev-crds/agent.open-cluster-management.io_klusterletaddonconfigs_crd.yaml
 
 .PHONY: utils-crds-uninstall
 utils-crds-uninstall:
-	kubectl delete -f deploy/dev-crds/agent.open-cluster-management.io_klusterletaddonconfigs_crd.yaml
+	$(KUBECTL) delete -f deploy/dev-crds/agent.open-cluster-management.io_klusterletaddonconfigs_crd.yaml
 
 ### FUNCTIONAL TESTS UTILS ###########
 
+.PHONY: deploy
 deploy:
-	kubectl apply -k overlays/community
+	$(KUBECTL) apply -k overlays/community
 
 .PHONY: functional-test
 functional-test: 
@@ -199,3 +199,28 @@ manifests: ensure-controller-gen
 # Generate deepcopy
 generate: ensure-controller-gen
 	$(CONTROLLER_GEN) "object" paths="./pkg/apis/agent/v1" output:dir="./pkg/apis/agent/v1"
+
+# e2e test
+.PHONY: prepare-e2e-cluster
+prepare-e2e-cluster:
+	echo $(KUBECONFIG)
+	build/install-e2e-cluster.sh
+
+cluster-ip:
+	CLUSTER_IP?=$(shell $(KUBECTL) get svc kubernetes -n default -o jsonpath="{.spec.clusterIP}")
+	CLUSTER_CONTEXT?=$(shell $(KUBECTL) config current-context)
+
+e2e-bootstrap-secret: cluster-ip
+	cp $(KUBECONFIG) e2e-kubeconfig
+	$(KUBECTL) config set clusters.$(CLUSTER_CONTEXT).server https://$(CLUSTER_IP) --kubeconfig e2e-kubeconfig
+	$(KUBECTL) delete secret bootstrap-hub-kubeconfig -n open-cluster-management-agent --ignore-not-found
+	$(KUBECTL) create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig=e2e-kubeconfig -n open-cluster-management-agent
+
+.PHONY: build-e2e
+build-e2e:
+	go test -c ./test/e2e -mod=mod
+
+.PHONY: test-e2e
+test-e2e: build-e2e prepare-e2e-cluster deploy
+	./e2e.test -test.v -ginkgo.v
+
