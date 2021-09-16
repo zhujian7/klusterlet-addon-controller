@@ -85,7 +85,32 @@ var _ = Describe("Loopback test", func() {
 			"app=work-manager",
 		}
 
-		By("Check agent addon pod numbers, will not check the pod Status as the image pull secret do not provide")
+		By("Check agent addon pod numbers, will not check the pod Status as the image pull secret do not provided")
+		Eventually(func() bool {
+			nsList, err := spokeClient.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+			if err != nil {
+				return false
+			}
+
+			for _, ns := range nsList.Items {
+				podList, err := spokeClient.CoreV1().Pods(ns.Name).List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					return false
+				}
+				pods := make([]string, 0)
+				for _, p := range podList.Items {
+					pods = append(pods, p.Name)
+				}
+				By(fmt.Sprintf("check pod for namespace %s, pods list: %v", ns.Name, pods))
+				if ns.Name == agentAddonNamespace {
+					By(fmt.Sprintf("=========================== namespace %v created ===========================", agentAddonNamespace))
+					return true
+				}
+			}
+
+			return false
+		}, 180*time.Second, 3*time.Second).Should(BeTrue())
+
 		for _, label := range labels {
 			Eventually(func() bool {
 				podList, err := spokeClient.CoreV1().Pods(agentAddonNamespace).List(context.TODO(), metav1.ListOptions{
@@ -97,7 +122,7 @@ var _ = Describe("Loopback test", func() {
 
 				By(fmt.Sprintf("check pod for %s, pod item: %d", label, len(podList.Items)))
 				return len(podList.Items) > 0
-			}, 180*time.Second, 1*time.Second).Should(BeTrue())
+			}, 600*time.Second, 1*time.Second).Should(BeTrue())
 		}
 
 		By("Delete klusterletaddonconfigs")

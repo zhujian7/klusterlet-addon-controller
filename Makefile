@@ -204,17 +204,7 @@ generate: ensure-controller-gen
 .PHONY: prepare-e2e-cluster
 prepare-e2e-cluster:
 	echo $(KUBECONFIG)
-	build/install-e2e-cluster.sh
-
-cluster-ip:
-	CLUSTER_IP?=$(shell $(KUBECTL) get svc kubernetes -n default -o jsonpath="{.spec.clusterIP}")
-	CLUSTER_CONTEXT?=$(shell $(KUBECTL) config current-context)
-
-e2e-bootstrap-secret: cluster-ip
-	cp $(KUBECONFIG) e2e-kubeconfig
-	$(KUBECTL) config set clusters.$(CLUSTER_CONTEXT).server https://$(CLUSTER_IP) --kubeconfig e2e-kubeconfig
-	$(KUBECTL) delete secret bootstrap-hub-kubeconfig -n open-cluster-management-agent --ignore-not-found
-	$(KUBECTL) create secret generic bootstrap-hub-kubeconfig --from-file=kubeconfig=e2e-kubeconfig -n open-cluster-management-agent
+	build/e2e/install-e2e-cluster.sh
 
 .PHONY: build-e2e
 build-e2e:
